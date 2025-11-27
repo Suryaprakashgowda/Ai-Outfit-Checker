@@ -7,7 +7,7 @@ import { Toaster } from '@/components/ui/toaster';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'dress-better-live-better',
+  title: 'Dress-Better-Live-Better',
   description: 'Get instant AI-powered feedback on your outfits with personalized style recommendations',
 };
 

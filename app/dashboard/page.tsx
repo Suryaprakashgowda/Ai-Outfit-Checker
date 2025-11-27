@@ -35,8 +35,31 @@ export default function Dashboard() {
   }) => {
     setAnalysisData(data);
 
+    let imageUrl = data.imageUrl;
+
+    // If the incoming imageUrl is a data URL (from camera), upload to storage and use public URL
+    if (imageUrl.startsWith('data:')) {
+      try {
+        const res = await fetch(imageUrl);
+        const blob = await res.blob();
+        const filename = `capture_${Date.now()}.jpg`;
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('outfit-images')
+          .upload(filename, blob, { contentType: 'image/jpeg' });
+
+        if (!uploadError && uploadData?.path) {
+          const { data: urlData } = supabase.storage.from('outfit-images').getPublicUrl(uploadData.path);
+          imageUrl = urlData.publicUrl;
+        } else if (uploadError) {
+          console.error('Storage upload error:', uploadError);
+        }
+      } catch (err) {
+        console.error('Error uploading captured image:', err);
+      }
+    }
+
     const outfitData: Omit<OutfitAnalysis, 'id' | 'created_at'> = {
-      image_url: data.imageUrl,
+      image_url: imageUrl,
       dominant_colors: data.colors,
       style_analysis: {
         colorHarmony: data.harmony,

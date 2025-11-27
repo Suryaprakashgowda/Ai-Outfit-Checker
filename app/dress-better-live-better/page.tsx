@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useState, useRef } from "react";
+import { useAuth } from '@/lib/auth-context';
+import { analyzeImageColors, calculateColorHarmony, calculateContrast, generateStyleSuggestions, DominantColor } from '@/lib/colorAnalysis';
+import { supabase } from '@/lib/supabase';
 
 // (Simple UI components copied from provided snippet to keep page self-contained)
 const Button = ({ 
@@ -141,6 +144,9 @@ export function DressBetterLiveBetter({ embed = false }: { embed?: boolean }) {
     suggestions: []
   });
 
+  // auth context to attach user_id if available
+  const authContext = useAuth();
+
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -165,6 +171,34 @@ export function DressBetterLiveBetter({ embed = false }: { embed?: boolean }) {
     setProfile(prev => ({ ...prev, [field]: value }));
   };
 
+  // Saves or upserts profile data into user_profiles table
+  const saveProfileToDb = async () => {
+    try {
+      const payload: any = {
+        gender: profile.gender || null,
+        age: profile.age || null,
+        height: profile.height || null,
+        weight: profile.weight || null,
+        skin_type: profile.skinType || null,
+        body_type: profile.bodyType || null,
+        style_preferences: profile.stylePreferences || [],
+        recommendation_preferences: profile.recommendationPreferences || [],
+        notes: ''
+      };
+
+      // If there's a logged-in user, attach user_id and perform upsert
+      if (authContext?.user?.id) {
+        payload.user_id = authContext.user.id;
+        await supabase.from('user_profiles').upsert(payload, { onConflict: 'user_id' });
+      } else {
+        // Insert a guest profile record (no user_id)
+        await supabase.from('user_profiles').insert(payload);
+      }
+    } catch (err) {
+      console.error('Error saving profile', err);
+    }
+  };
+
   const toggleStylePreference = (preference: string) => {
     setProfile(prev => {
       const prefs = [...prev.stylePreferences];
@@ -175,21 +209,104 @@ export function DressBetterLiveBetter({ embed = false }: { embed?: boolean }) {
     });
   };
 
-  const handleFileUpload = (file: File) => {
+  // helper: upload blob to storage and return public url
+  const uploadFileToStorage = async (file: Blob, filename: string) => {
+    try {
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('outfit-images')
+        .upload(filename, file, { contentType: 'image/jpeg' });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from('outfit-images').getPublicUrl(uploadData.path);
+      return urlData.publicUrl;
+    } catch (err) {
+      console.error('Upload error', err);
+      return null;
+    }
+  };
+
+  const createOutfitRecord = async (imageUrl: string, colors: DominantColor[], harmony: string, contrast: string, suggestions: string[], score: number) => {
+    const outfitData = {
+      image_url: imageUrl,
+      dominant_colors: colors,
+      style_analysis: {
+        colorHarmony: harmony,
+        contrast: contrast,
+        versatility: 'medium',
+        seasonality: 'all-season'
+      },
+      suggestions: suggestions.join('\n'),
+      overall_score: score,
+      is_favorite: false
+    };
+
+    try {
+      await supabase.from('outfit_analyses').insert([outfitData]);
+    } catch (err) {
+      console.error('Error inserting outfit record', err);
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
     if (file && file.type.startsWith("image/")) {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        setAnalysis({
-          image: e.target?.result as string,
-          score: Math.floor(Math.random() * 40) + 60,
-          styleCategory: ["Casual", "Formal", "Business", "Streetwear"][Math.floor(Math.random() * 4)],
-          confidence: Math.floor(Math.random() * 30) + 70,
-          suggestions: [
-            "Consider adding a statement accessory",
-            "Try a different color palette",
-            "Balance proportions with fitted bottoms"
-          ]
-        });
+      reader.onload = async (e) => {
+        const dataUrl = e.target?.result as string;
+
+        // create a blob from data url for upload
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+
+        const filename = `capture_${Date.now()}.jpg`;
+        const imageUrl = await uploadFileToStorage(blob, filename);
+
+        const generatedScore = Math.floor(Math.random() * 40) + 60;
+
+          // analyze the image data and create real analysis
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+            const colors = analyzeImageColors(imageData);
+            const harmony = calculateColorHarmony(colors);
+            const contrast = calculateContrast(colors);
+            const suggestionsArr = generateStyleSuggestions(colors, harmony, contrast).split('.').filter(Boolean).map(s => s.trim());
+
+            const calculateScore = (harmony: string, contrast: string, colors: DominantColor[]): number => {
+              let score = 5;
+              if (harmony === 'complementary' || harmony === 'analogous') score += 2;
+              if (harmony === 'triadic') score += 1;
+              if (contrast === 'medium') score += 2;
+              if (contrast === 'high') score += 1;
+              if (colors.length >= 2 && colors.length <= 4) score += 1;
+              return Math.min(10, Math.max(1, score));
+            };
+
+            const score = calculateScore(harmony, contrast, colors);
+
+            setAnalysis({
+              image: dataUrl,
+              score,
+              styleCategory: ["Casual", "Formal", "Business", "Streetwear"][Math.floor(Math.random() * 4)],
+              confidence: Math.floor(Math.random() * 30) + 70,
+              suggestions: suggestionsArr
+            });
+
+            // Save record to DB pointing to stored image URL (if upload succeeded)
+            if (imageUrl) {
+              createOutfitRecord(imageUrl, colors, harmony, contrast, suggestionsArr, score);
+            }
+          };
+          img.src = dataUrl;
+
         setRecommendations(mockRecommendations);
         setActiveTab("recommendations");
       };
@@ -212,7 +329,8 @@ export function DressBetterLiveBetter({ embed = false }: { embed?: boolean }) {
   // Camera functions
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      // Use front camera on laptops (user) so clicking "Use Camera" opens the built-in webcam
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         setCameraActive(true);
@@ -223,7 +341,7 @@ export function DressBetterLiveBetter({ embed = false }: { embed?: boolean }) {
     }
   };
 
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
@@ -232,11 +350,64 @@ export function DressBetterLiveBetter({ embed = false }: { embed?: boolean }) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageUrl = canvas.toDataURL('image/jpeg');
-    setAnalysis(prev => ({ ...prev, image: imageUrl, score: Math.floor(Math.random() * 40) + 60, styleCategory: 'Captured' }));
-    setRecommendations(mockRecommendations);
-    setActiveTab('recommendations');
-    stopCamera();
+    const dataUrl = canvas.toDataURL('image/jpeg');
+
+    try {
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      const filename = `capture_${Date.now()}.jpg`;
+      const storedUrl = await uploadFileToStorage(blob, filename);
+
+      const generatedScore = Math.floor(Math.random() * 40) + 60;
+
+      setAnalysis(prev => ({ ...prev, image: dataUrl, score: generatedScore, styleCategory: 'Captured' }));
+
+      if (storedUrl) {
+        // analyze captured image before saving
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = async () => {
+          const canvas2 = document.createElement('canvas');
+          canvas2.width = img.width;
+          canvas2.height = img.height;
+          const ctx2 = canvas2.getContext('2d');
+          if (!ctx2) return;
+          ctx2.drawImage(img, 0, 0);
+          const imageData2 = ctx2.getImageData(0, 0, canvas2.width, canvas2.height);
+
+          const colors = analyzeImageColors(imageData2);
+          const harmony = calculateColorHarmony(colors);
+          const contrast = calculateContrast(colors);
+          const suggestionsArr = generateStyleSuggestions(colors, harmony, contrast).split('.').filter(Boolean).map(s => s.trim());
+
+          const calculateScore = (harmony: string, contrast: string, colors: DominantColor[]): number => {
+            let score = 5;
+            if (harmony === 'complementary' || harmony === 'analogous') score += 2;
+            if (harmony === 'triadic') score += 1;
+            if (contrast === 'medium') score += 2;
+            if (contrast === 'high') score += 1;
+            if (colors.length >= 2 && colors.length <= 4) score += 1;
+            return Math.min(10, Math.max(1, score));
+          };
+
+          const score = calculateScore(harmony, contrast, colors);
+
+          // update UI with analysis
+          setAnalysis(prev => ({ ...prev, image: dataUrl, score, styleCategory: 'Captured', confidence: Math.floor(Math.random() * 30) + 70, suggestions: suggestionsArr }));
+
+          // save DB record
+          await createOutfitRecord(storedUrl, colors, harmony, contrast, suggestionsArr, score);
+        };
+        img.src = dataUrl;
+      }
+
+      setRecommendations(mockRecommendations);
+      setActiveTab('recommendations');
+    } catch (err) {
+      console.error('Capture/upload failed', err);
+    } finally {
+      stopCamera();
+    }
   };
 
   const stopCamera = () => {
@@ -251,7 +422,7 @@ export function DressBetterLiveBetter({ embed = false }: { embed?: boolean }) {
   const innerContent = (
     <div className="max-w-6xl mx-auto">
         <header className="mb-8 text-center">
-          <h1 className="text-3xl md:text-4xl font-bold text-indigo-900">Dress Better, Live Better</h1>
+          <h1 className="text-3xl md:text-4xl font-bold text-indigo-900">AI Out Fit Checker </h1>
           <p className="text-indigo-700 mt-2">Personalized outfit advisor for your best look</p>
         </header>
 
@@ -353,7 +524,7 @@ export function DressBetterLiveBetter({ embed = false }: { embed?: boolean }) {
               </div>
 
               <div className="flex justify-end">
-                <Button onClick={()=> setActiveTab('upload')} disabled={!isProfileComplete()} className="flex items-center gap-2"><UploadIcon className="w-4 h-4"/>Upload Outfit</Button>
+                <Button onClick={async () => { await saveProfileToDb(); setActiveTab('upload'); }} disabled={!isProfileComplete()} className="flex items-center gap-2"><UploadIcon className="w-4 h-4"/>Upload Outfit</Button>
               </div>
             </CardContent>
           </Card>

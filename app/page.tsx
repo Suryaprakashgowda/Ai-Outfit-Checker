@@ -12,7 +12,7 @@ export default function LandingPage() {
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Sparkles className="h-6 w-6 text-purple-400" />
-            <span className="text-xl font-bold text-white">dress-better-live-better</span>
+            <span className="text-xl font-bold text-white">Dress-Better-Live-Better</span>
           </div>
           <div className="space-x-4">
             <Link 
