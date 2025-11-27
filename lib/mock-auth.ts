@@ -11,10 +11,12 @@ class MockAuthService {
   private listeners: ((user: User | null) => void)[] = [];
 
   private constructor() {
-    // Check for existing session in localStorage
-    const savedUser = localStorage.getItem('mock_user');
-    if (savedUser) {
-      this.currentUser = JSON.parse(savedUser);
+    // Only access localStorage in browser (avoid server-side errors)
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      const savedUser = localStorage.getItem('mock_user');
+      if (savedUser) {
+        this.currentUser = JSON.parse(savedUser);
+      }
     }
   }
 
@@ -38,7 +40,9 @@ class MockAuthService {
       };
       
       this.currentUser = user;
-      localStorage.setItem('mock_user', JSON.stringify(user));
+      if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+        localStorage.setItem('mock_user', JSON.stringify(user));
+      }
       this.notifyListeners(user);
       
       return { user, error: null };
@@ -56,7 +60,9 @@ class MockAuthService {
 
   async signOut(): Promise<{ error: Error | null }> {
     this.currentUser = null;
-    localStorage.removeItem('mock_user');
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      localStorage.removeItem('mock_user');
+    }
     this.notifyListeners(null);
     return { error: null };
   }

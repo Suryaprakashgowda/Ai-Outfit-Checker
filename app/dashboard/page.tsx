@@ -7,6 +7,7 @@ import AnalysisResults from '@/components/AnalysisResults';
 import StyleTips from '@/components/StyleTips';
 import OutfitHistory from '@/components/OutfitHistory';
 import { Button } from '@/components/ui/button';
+import { DressBetterLiveBetter } from '../dress-better-live-better/page';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase, OutfitAnalysis } from '@/lib/supabase';
 import { DominantColor } from '@/lib/colorAnalysis';
@@ -88,7 +89,7 @@ export default function Dashboard() {
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-8 h-14 bg-gray-800/50">
+          <TabsList className="grid w-full grid-cols-4 mb-8 h-14 bg-gray-800/50">
             <TabsTrigger value="upload" className="text-lg gap-2 data-[state=active]:bg-purple-600 text-gray-300 data-[state=active]:text-white">
               <Sparkles className="w-5 h-5" />
               Analyze Outfit
@@ -100,6 +101,10 @@ export default function Dashboard() {
             <TabsTrigger value="tips" className="text-lg gap-2 data-[state=active]:bg-purple-600 text-gray-300 data-[state=active]:text-white">
               <BookOpen className="w-5 h-5" />
               Style Guide
+            </TabsTrigger>
+            <TabsTrigger value="dress" className="text-lg gap-2 data-[state=active]:bg-blue-600 text-gray-300 data-[state=active]:text-white">
+              <Sparkles className="w-5 h-5" />
+              Dress Better
             </TabsTrigger>
           </TabsList>
 
@@ -172,6 +177,13 @@ export default function Dashboard() {
 
           <TabsContent value="tips">
             <StyleTips />
+          </TabsContent>
+
+          <TabsContent value="dress">
+            <div className="p-4 bg-white rounded-xl shadow-sm">
+              {/* Embedded Dress Better app inside dashboard (logged-in experience) */}
+              <DressBetterLiveBetter embed />
+            </div>
           </TabsContent>
         </Tabs>
 
